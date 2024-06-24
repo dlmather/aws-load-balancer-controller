@@ -2,13 +2,17 @@ package targetgroupbinding
 
 import (
 	"context"
+	"fmt"
+	"net/netip"
+	"sync"
+	"time"
+
 	"github.com/aws/aws-sdk-go/aws"
 	elbv2sdk "github.com/aws/aws-sdk-go/service/elbv2"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/util/cache"
 	"sigs.k8s.io/aws-load-balancer-controller/pkg/aws/services"
-	"sync"
-	"time"
+	"sigs.k8s.io/aws-load-balancer-controller/pkg/networking"
 )
 
 const (
@@ -30,7 +34,7 @@ type TargetsManager interface {
 }
 
 // NewCachedTargetsManager constructs new cachedTargetsManager
-func NewCachedTargetsManager(elbv2Client services.ELBV2, logger logr.Logger) *cachedTargetsManager {
+func NewCachedTargetsManager(elbv2Client services.ELBV2, cidrBlocks []string, logger logr.Logger) *cachedTargetsManager {
 	return &cachedTargetsManager{
 		elbv2Client:                elbv2Client,
 		targetsCache:               cache.NewExpiring(),
@@ -38,6 +42,7 @@ func NewCachedTargetsManager(elbv2Client services.ELBV2, logger logr.Logger) *ca
 		registerTargetsChunkSize:   defaultRegisterTargetsChunkSize,
 		deregisterTargetsChunkSize: defaultDeregisterTargetsChunkSize,
 		logger:                     logger,
+		cidrBlocks:                 cidrBlocks,
 	}
 }
 
@@ -63,6 +68,9 @@ type cachedTargetsManager struct {
 	registerTargetsChunkSize int
 	// chunk size for deregisterTargets API call.
 	deregisterTargetsChunkSize int
+
+	// cidrBlocks specifies the set of IP ranges to watch for in CIDR notation.
+	cidrBlocks []string
 
 	logger logr.Logger
 }
@@ -197,8 +205,19 @@ func (m *cachedTargetsManager) listTargetsFromAWS(ctx context.Context, tgARN str
 		return nil, err
 	}
 
+	cidrs, err := networking.ParseCIDRs(m.cidrBlocks)
+
 	listedTargets := make([]TargetInfo, 0, len(resp.TargetHealthDescriptions))
 	for _, elem := range resp.TargetHealthDescriptions {
+		if len(cidrs) > 0 {
+			ip, err := netip.ParseAddr(aws.StringValue(elem.Target.Id))
+			if err != nil {
+				return nil, fmt.Errorf("parse ip addr: %w", err)
+			}
+			if !networking.IsIPWithinCIDRs(ip, cidrs) {
+				continue
+			}
+		}
 		listedTargets = append(listedTargets, TargetInfo{
 			Target:       *elem.Target,
 			TargetHealth: elem.TargetHealth,
@@ -295,4 +314,22 @@ func pointerizeTargetDescriptions(targets []elbv2sdk.TargetDescription) []*elbv2
 // cloneTargetInfoSlice returns a clone of TargetInfoSlice.
 func cloneTargetInfoSlice(targets []TargetInfo) []TargetInfo {
 	return append(targets[:0:0], targets...)
+}
+
+func isInCIDRRange(cidrBlocks []string, ipAddr string) (bool, error) {
+	ip, err := netip.ParseAddr(ipAddr)
+	if err != nil {
+		return false, fmt.Errorf("parse ip address: %w", err)
+	}
+	for _, cidr := range cidrBlocks {
+		network, err := netip.ParsePrefix(cidr)
+		if err != nil {
+			return false, fmt.Errorf("parse cidr prefix: %w", err)
+		}
+		if network.Contains(ip) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }

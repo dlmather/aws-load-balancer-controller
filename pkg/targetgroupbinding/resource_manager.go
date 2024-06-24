@@ -38,10 +38,10 @@ type ResourceManager interface {
 func NewDefaultResourceManager(k8sClient client.Client, elbv2Client services.ELBV2, ec2Client services.EC2,
 	podInfoRepo k8s.PodInfoRepo, sgManager networking.SecurityGroupManager, sgReconciler networking.SecurityGroupReconciler,
 	vpcInfoProvider networking.VPCInfoProvider,
-	vpcID string, clusterName string, failOpenEnabled bool, endpointSliceEnabled bool, disabledRestrictedSGRulesFlag bool,
+	vpcID string, clusterName string, cidrBlocks []string, failOpenEnabled bool, endpointSliceEnabled bool, disabledRestrictedSGRulesFlag bool,
 	endpointSGTags map[string]string,
 	eventRecorder record.EventRecorder, logger logr.Logger) *defaultResourceManager {
-	targetsManager := NewCachedTargetsManager(elbv2Client, logger)
+	targetsManager := NewCachedTargetsManager(elbv2Client, cidrBlocks, logger)
 	endpointResolver := backend.NewDefaultEndpointResolver(k8sClient, podInfoRepo, failOpenEnabled, endpointSliceEnabled, logger)
 
 	nodeInfoProvider := networking.NewDefaultNodeInfoProvider(ec2Client, logger)

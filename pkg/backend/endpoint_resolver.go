@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"fmt"
+	"net/netip"
 
 	awssdk "github.com/aws/aws-sdk-go/aws"
 	"github.com/go-logr/logr"
@@ -13,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/aws-load-balancer-controller/pkg/k8s"
+	"sigs.k8s.io/aws-load-balancer-controller/pkg/networking"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -36,9 +38,10 @@ type EndpointResolver interface {
 }
 
 // NewDefaultEndpointResolver constructs new defaultEndpointResolver
-func NewDefaultEndpointResolver(k8sClient client.Client, podInfoRepo k8s.PodInfoRepo, failOpenEnabled bool, endpointSliceEnabled bool, logger logr.Logger) *defaultEndpointResolver {
+func NewDefaultEndpointResolver(k8sClient client.Client, cidrs []netip.Prefix, podInfoRepo k8s.PodInfoRepo, failOpenEnabled bool, endpointSliceEnabled bool, logger logr.Logger) *defaultEndpointResolver {
 	return &defaultEndpointResolver{
 		k8sClient:            k8sClient,
+		cidrs:                cidrs,
 		podInfoRepo:          podInfoRepo,
 		failOpenEnabled:      failOpenEnabled,
 		endpointSliceEnabled: endpointSliceEnabled,
@@ -50,7 +53,9 @@ var _ EndpointResolver = &defaultEndpointResolver{}
 
 // default implementation for EndpointResolver
 type defaultEndpointResolver struct {
-	k8sClient   client.Client
+	k8sClient client.Client
+	// cidrs specifies the set of IP ranges to watch for in CIDR notation.
+	cidrs       []netip.Prefix
 	podInfoRepo k8s.PodInfoRepo
 	// [NodePort Endpoint] if fail-open enabled, then nodes that have `Unknown` ready condition will be included if there is no other node with `True` ready condition.
 	// [Pod Endpoint] if fail-open enabled, then containerRead pods on nodes that have `Unknown` ready condition will be included if there is no other pods that are ready.
@@ -170,6 +175,17 @@ func (r *defaultEndpointResolver) resolvePodEndpointsWithEndpointsData(ctx conte
 					containsPotentialReadyEndpoints = true
 					continue
 				}
+
+				if len(r.cidrs) > 0 {
+					ip, err := netip.ParseAddr(epAddr)
+					if err != nil {
+						return nil, false, fmt.Errorf("parse ip addr: %w", err)
+					}
+					if !networking.IsIPWithinCIDRs(ip, r.cidrs) {
+						continue
+					}
+				}
+
 				podEndpoint := buildPodEndpoint(pod, epAddr, epPort)
 				if ep.Conditions.Ready != nil && *ep.Conditions.Ready {
 					readyPodEndpoints = append(readyPodEndpoints, podEndpoint)

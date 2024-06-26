@@ -99,6 +99,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	cidrs, err := networking.ParseCIDRs(controllerCFG.CIDRBlocks)
+	if err != nil {
+		setupLog.Error(err, "unable to parse cidrs")
+		os.Exit(1)
+	}
+
 	podInfoRepo := k8s.NewDefaultPodInfoRepo(clientSet.CoreV1().RESTClient(), rtOpts.Namespace, ctrl.Log)
 	finalizerManager := k8s.NewDefaultFinalizerManager(mgr.GetClient(), ctrl.Log)
 	sgManager := networking.NewDefaultSecurityGroupManager(cloud.EC2(), ctrl.Log)
@@ -109,6 +115,7 @@ func main() {
 	tgbResManager := targetgroupbinding.NewDefaultResourceManager(mgr.GetClient(), cloud.ELBV2(), cloud.EC2(),
 		podInfoRepo, sgManager, sgReconciler, vpcInfoProvider,
 		cloud.VpcID(), controllerCFG.ClusterName, controllerCFG.FeatureGates.Enabled(config.EndpointsFailOpen), controllerCFG.EnableEndpointSlices, controllerCFG.DisableRestrictedSGRules,
+		cidrs,
 		controllerCFG.ServiceTargetENISGTags, mgr.GetEventRecorderFor("targetGroupBinding"), ctrl.Log)
 	backendSGProvider := networking.NewBackendSGProvider(controllerCFG.ClusterName, controllerCFG.BackendSecurityGroup,
 		cloud.VpcID(), cloud.EC2(), mgr.GetClient(), controllerCFG.DefaultTags, ctrl.Log.WithName("backend-sg-provider"))

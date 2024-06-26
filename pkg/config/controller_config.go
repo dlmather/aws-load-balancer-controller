@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 const (
 	flagLogLevel                                     = "log-level"
 	flagK8sClusterName                               = "cluster-name"
+	flagCIDRBlocks                                   = "cidr-blocks"
 	flagDefaultTags                                  = "default-tags"
 	flagDefaultTargetType                            = "default-target-type"
 	flagExternalManagedTags                          = "external-managed-tags"
@@ -98,6 +101,9 @@ type ControllerConfig struct {
 	// DisableRestrictedSGRules specifies whether to use restricted security group rules
 	DisableRestrictedSGRules bool
 
+	// CIDRBlocks specifies the set of IP ranges to watch for in CIDR notation.
+	CIDRBlocks []string
+
 	FeatureGates FeatureGates
 }
 
@@ -106,6 +112,7 @@ func (cfg *ControllerConfig) BindFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&cfg.LogLevel, flagLogLevel, defaultLogLevel,
 		"Set the controller log level - info(default), debug")
 	fs.StringVar(&cfg.ClusterName, flagK8sClusterName, "", "Kubernetes cluster name")
+	fs.StringSliceVar(&cfg.CIDRBlocks, flagCIDRBlocks, []string{}, "CIDR ranges to watch over")
 	fs.StringToStringVar(&cfg.DefaultTags, flagDefaultTags, nil,
 		"Default AWS Tags that will be applied to all AWS resources managed by this controller")
 	fs.StringVar(&cfg.DefaultTargetType, flagDefaultTargetType, string(elbv2.TargetTypeInstance),
@@ -143,6 +150,14 @@ func (cfg *ControllerConfig) BindFlags(fs *pflag.FlagSet) {
 func (cfg *ControllerConfig) Validate() error {
 	if len(cfg.ClusterName) == 0 {
 		return errors.New("kubernetes cluster name must be specified")
+	}
+
+	if len(cfg.CIDRBlocks) > 0 {
+		for _, cidr := range cfg.CIDRBlocks {
+			if _, _, err := net.ParseCIDR(cidr); err != nil {
+				return fmt.Errorf("parse cidr: %w", err)
+			}
+		}
 	}
 
 	if err := cfg.validateDefaultTagsCollisionWithTrackingTags(); err != nil {

@@ -2,14 +2,18 @@ package targetgroupbinding
 
 import (
 	"context"
+	"fmt"
+	"net/netip"
+	"sync"
+	"time"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	elbv2sdk "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	elbv2types "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/util/cache"
 	"sigs.k8s.io/aws-load-balancer-controller/pkg/aws/services"
-	"sync"
-	"time"
+	"sigs.k8s.io/aws-load-balancer-controller/pkg/networking"
 )
 
 const (
@@ -27,7 +31,7 @@ type TargetsManager interface {
 	DeregisterTargets(ctx context.Context, tgARN string, targets []elbv2types.TargetDescription) error
 
 	// List Targets from TargetGroup.
-	ListTargets(ctx context.Context, tgARN string) ([]TargetInfo, error)
+	ListTargets(ctx context.Context, tgARN string, cidrs []netip.Prefix) ([]TargetInfo, error)
 }
 
 // NewCachedTargetsManager constructs new cachedTargetsManager
@@ -118,7 +122,7 @@ func (m *cachedTargetsManager) DeregisterTargets(ctx context.Context, tgARN stri
 	return nil
 }
 
-func (m *cachedTargetsManager) ListTargets(ctx context.Context, tgARN string) ([]TargetInfo, error) {
+func (m *cachedTargetsManager) ListTargets(ctx context.Context, tgARN string, cidrs []netip.Prefix) ([]TargetInfo, error) {
 	m.targetsCacheMutex.Lock()
 	defer m.targetsCacheMutex.Unlock()
 
@@ -126,7 +130,7 @@ func (m *cachedTargetsManager) ListTargets(ctx context.Context, tgARN string) ([
 		targetsCacheItem := rawTargetsCacheItem.(*targetsCacheItem)
 		targetsCacheItem.mutex.Lock()
 		defer targetsCacheItem.mutex.Unlock()
-		refreshedTargets, err := m.refreshUnhealthyTargets(ctx, tgARN, targetsCacheItem.targets)
+		refreshedTargets, err := m.refreshUnhealthyTargets(ctx, tgARN, targetsCacheItem.targets, cidrs)
 		if err != nil {
 			return nil, err
 		}
@@ -134,7 +138,7 @@ func (m *cachedTargetsManager) ListTargets(ctx context.Context, tgARN string) ([
 		return cloneTargetInfoSlice(refreshedTargets), nil
 	}
 
-	refreshedTargets, err := m.refreshAllTargets(ctx, tgARN)
+	refreshedTargets, err := m.refreshAllTargets(ctx, tgARN, cidrs)
 	if err != nil {
 		return nil, err
 	}
@@ -147,8 +151,8 @@ func (m *cachedTargetsManager) ListTargets(ctx context.Context, tgARN string) ([
 }
 
 // refreshAllTargets will refresh all targets for targetGroup.
-func (m *cachedTargetsManager) refreshAllTargets(ctx context.Context, tgARN string) ([]TargetInfo, error) {
-	targets, err := m.listTargetsFromAWS(ctx, tgARN, nil)
+func (m *cachedTargetsManager) refreshAllTargets(ctx context.Context, tgARN string, cidrs []netip.Prefix) ([]TargetInfo, error) {
+	targets, err := m.listTargetsFromAWS(ctx, tgARN, nil, cidrs)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +162,7 @@ func (m *cachedTargetsManager) refreshAllTargets(ctx context.Context, tgARN stri
 // refreshUnhealthyTargets will refresh targets that are not in healthy status for targetGroup.
 // To save API calls, we don't refresh targets that are already healthy since once a target turns healthy, we'll unblock it's readinessProbe.
 // we can do nothing from controller perspective when a healthy target becomes unhealthy.
-func (m *cachedTargetsManager) refreshUnhealthyTargets(ctx context.Context, tgARN string, cachedTargets []TargetInfo) ([]TargetInfo, error) {
+func (m *cachedTargetsManager) refreshUnhealthyTargets(ctx context.Context, tgARN string, cachedTargets []TargetInfo, cidrs []netip.Prefix) ([]TargetInfo, error) {
 	var refreshedTargets []TargetInfo
 	var unhealthyTargets []elbv2types.TargetDescription
 	for _, cachedTarget := range cachedTargets {
@@ -172,7 +176,7 @@ func (m *cachedTargetsManager) refreshUnhealthyTargets(ctx context.Context, tgAR
 		return refreshedTargets, nil
 	}
 
-	refreshedUnhealthyTargets, err := m.listTargetsFromAWS(ctx, tgARN, unhealthyTargets)
+	refreshedUnhealthyTargets, err := m.listTargetsFromAWS(ctx, tgARN, unhealthyTargets, cidrs)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +192,7 @@ func (m *cachedTargetsManager) refreshUnhealthyTargets(ctx context.Context, tgAR
 // listTargetsFromAWS will list targets for TargetGroup using ELBV2API.
 // if specified targets is non-empty, only these targets will be listed.
 // otherwise, all targets for targetGroup will be listed.
-func (m *cachedTargetsManager) listTargetsFromAWS(ctx context.Context, tgARN string, targets []elbv2types.TargetDescription) ([]TargetInfo, error) {
+func (m *cachedTargetsManager) listTargetsFromAWS(ctx context.Context, tgARN string, targets []elbv2types.TargetDescription, cidrs []netip.Prefix) ([]TargetInfo, error) {
 	req := &elbv2sdk.DescribeTargetHealthInput{
 		TargetGroupArn: aws.String(tgARN),
 		Targets:        pointerizeTargetDescriptions(targets),
@@ -200,6 +204,15 @@ func (m *cachedTargetsManager) listTargetsFromAWS(ctx context.Context, tgARN str
 
 	listedTargets := make([]TargetInfo, 0, len(resp.TargetHealthDescriptions))
 	for _, elem := range resp.TargetHealthDescriptions {
+		if len(cidrs) > 0 {
+			ip, err := netip.ParseAddr(*elem.Target.Id)
+			if err != nil {
+				return nil, fmt.Errorf("parse ip addr: %w", err)
+			}
+			if !networking.IsIPWithinCIDRs(ip, cidrs) {
+				continue
+			}
+		}
 		listedTargets = append(listedTargets, TargetInfo{
 			Target:       *elem.Target,
 			TargetHealth: elem.TargetHealth,

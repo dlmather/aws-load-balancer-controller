@@ -201,7 +201,7 @@ func (m *defaultNetworkingManager) reconcileWithIngressPermissionsPerSG(ctx cont
 	computedForAllTGBs := m.consolidateIngressPermissionsPerSGByTGB(ctx, tgbsWithNetworking)
 	aggregatedIngressPermissionsPerSG := m.computeAggregatedIngressPermissionsPerSG(ctx)
 
-	permissionSelector := labels.SelectorFromSet(labels.Set{tgbNetworkingIPPermissionLabelKey: tgbNetworkingIPPermissionLabelValue})
+	permissionSelector := labels.SelectorFromSet(labels.Set{tgbNetworkingIPPermissionLabelKey: m.clusterName})
 	var sgReconciliationErrors []error
 	for sgID, permissions := range aggregatedIngressPermissionsPerSG {
 		if err := m.sgReconciler.ReconcileIngress(ctx, sgID, permissions,
@@ -420,7 +420,7 @@ func (m *defaultNetworkingManager) computePermissionsForPeerPort(ctx context.Con
 		})
 	}
 
-	permissionLabels := map[string]string{tgbNetworkingIPPermissionLabelKey: tgbNetworkingIPPermissionLabelValue}
+	permissionLabels := map[string]string{tgbNetworkingIPPermissionLabelKey: m.clusterName}
 	if peer.SecurityGroup != nil {
 		groupID := peer.SecurityGroup.GroupID
 		permissions := make([]networking.IPPermissionInfo, 0, len(sdkFromToPortPairs))
@@ -483,7 +483,7 @@ func (m *defaultNetworkingManager) gcIngressPermissionsFromUnusedEndpointSGs(ctx
 	usedEndpointSGs := sets.StringKeySet(ingressPermissionsPerSG)
 	unusedEndpointSGs := endpointSGs.Difference(usedEndpointSGs)
 
-	permissionSelector := labels.SelectorFromSet(labels.Set{tgbNetworkingIPPermissionLabelKey: tgbNetworkingIPPermissionLabelValue})
+	permissionSelector := labels.SelectorFromSet(labels.Set{tgbNetworkingIPPermissionLabelKey: m.clusterName})
 	for sgID := range unusedEndpointSGs {
 		err := m.sgReconciler.ReconcileIngress(ctx, sgID, nil,
 			networking.WithPermissionSelector(permissionSelector))

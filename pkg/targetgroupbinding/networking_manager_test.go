@@ -17,6 +17,8 @@ import (
 	"sigs.k8s.io/aws-load-balancer-controller/pkg/networking"
 )
 
+const testClusterName = "test-123"
+
 func Test_defaultNetworkingManager_computeIngressPermissionsForTGBNetworking(t *testing.T) {
 	port8080 := intstr.FromInt(8080)
 	port8443 := intstr.FromInt(8443)
@@ -60,12 +62,12 @@ func Test_defaultNetworkingManager_computeIngressPermissionsForTGBNetworking(t *
 						ToPort:     awssdk.Int64(8080),
 						UserIdGroupPairs: []*ec2sdk.UserIdGroupPair{
 							{
-								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=shared"),
+								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=test-123"),
 								GroupId:     awssdk.String("sg-abcdefg"),
 							},
 						},
 					},
-					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: tgbNetworkingIPPermissionLabelValue},
+					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: testClusterName},
 				},
 			},
 		},
@@ -107,12 +109,12 @@ func Test_defaultNetworkingManager_computeIngressPermissionsForTGBNetworking(t *
 						ToPort:     awssdk.Int64(8080),
 						UserIdGroupPairs: []*ec2sdk.UserIdGroupPair{
 							{
-								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=shared"),
+								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=test-123"),
 								GroupId:     awssdk.String("sg-abcdefg"),
 							},
 						},
 					},
-					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: tgbNetworkingIPPermissionLabelValue},
+					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: testClusterName},
 				},
 				{
 					Permission: ec2sdk.IpPermission{
@@ -121,12 +123,12 @@ func Test_defaultNetworkingManager_computeIngressPermissionsForTGBNetworking(t *
 						ToPort:     awssdk.Int64(8443),
 						UserIdGroupPairs: []*ec2sdk.UserIdGroupPair{
 							{
-								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=shared"),
+								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=test-123"),
 								GroupId:     awssdk.String("sg-abcdefg"),
 							},
 						},
 					},
-					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: tgbNetworkingIPPermissionLabelValue},
+					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: testClusterName},
 				},
 				{
 					Permission: ec2sdk.IpPermission{
@@ -135,12 +137,12 @@ func Test_defaultNetworkingManager_computeIngressPermissionsForTGBNetworking(t *
 						ToPort:     awssdk.Int64(8080),
 						IpRanges: []*ec2sdk.IpRange{
 							{
-								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=shared"),
+								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=test-123"),
 								CidrIp:      awssdk.String("192.168.1.1/16"),
 							},
 						},
 					},
-					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: tgbNetworkingIPPermissionLabelValue},
+					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: testClusterName},
 				},
 				{
 					Permission: ec2sdk.IpPermission{
@@ -149,12 +151,12 @@ func Test_defaultNetworkingManager_computeIngressPermissionsForTGBNetworking(t *
 						ToPort:     awssdk.Int64(8443),
 						IpRanges: []*ec2sdk.IpRange{
 							{
-								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=shared"),
+								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=test-123"),
 								CidrIp:      awssdk.String("192.168.1.1/16"),
 							},
 						},
 					},
-					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: tgbNetworkingIPPermissionLabelValue},
+					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: testClusterName},
 				},
 			},
 		},
@@ -202,12 +204,12 @@ func Test_defaultNetworkingManager_computeIngressPermissionsForTGBNetworking(t *
 						ToPort:     awssdk.Int64(8080),
 						UserIdGroupPairs: []*ec2sdk.UserIdGroupPair{
 							{
-								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=shared"),
+								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=test-123"),
 								GroupId:     awssdk.String("sg-abcdefg"),
 							},
 						},
 					},
-					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: tgbNetworkingIPPermissionLabelValue},
+					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: testClusterName},
 				},
 				{
 					Permission: ec2sdk.IpPermission{
@@ -216,19 +218,21 @@ func Test_defaultNetworkingManager_computeIngressPermissionsForTGBNetworking(t *
 						ToPort:     awssdk.Int64(8443),
 						IpRanges: []*ec2sdk.IpRange{
 							{
-								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=shared"),
+								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=test-123"),
 								CidrIp:      awssdk.String("192.168.1.1/16"),
 							},
 						},
 					},
-					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: tgbNetworkingIPPermissionLabelValue},
+					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: testClusterName},
 				},
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &defaultNetworkingManager{}
+			m := &defaultNetworkingManager{
+                clusterName: testClusterName,
+            }
 			got, err := m.computeIngressPermissionsForTGBNetworking(context.Background(), tt.args.tgbNetworking, tt.args.pods)
 			if tt.wantErr != nil {
 				assert.EqualError(t, err, tt.wantErr.Error())
@@ -277,12 +281,12 @@ func Test_defaultNetworkingManager_computePermissionsForPeerPort(t *testing.T) {
 						ToPort:     awssdk.Int64(8080),
 						UserIdGroupPairs: []*ec2sdk.UserIdGroupPair{
 							{
-								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=shared"),
+								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=test-123"),
 								GroupId:     awssdk.String("sg-abcdefg"),
 							},
 						},
 					},
-					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: tgbNetworkingIPPermissionLabelValue},
+					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: testClusterName},
 				},
 			},
 		},
@@ -309,11 +313,11 @@ func Test_defaultNetworkingManager_computePermissionsForPeerPort(t *testing.T) {
 						IpRanges: []*ec2sdk.IpRange{
 							{
 								CidrIp:      awssdk.String("192.168.1.1/16"),
-								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=shared"),
+								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=test-123"),
 							},
 						},
 					},
-					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: tgbNetworkingIPPermissionLabelValue},
+					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: testClusterName},
 				},
 			},
 		},
@@ -340,11 +344,11 @@ func Test_defaultNetworkingManager_computePermissionsForPeerPort(t *testing.T) {
 						Ipv6Ranges: []*ec2sdk.Ipv6Range{
 							{
 								CidrIpv6:    awssdk.String("2002::1234:abcd:ffff:c0a8:101/64"),
-								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=shared"),
+								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=test-123"),
 							},
 						},
 					},
-					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: tgbNetworkingIPPermissionLabelValue},
+					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: testClusterName},
 				},
 			},
 		},
@@ -389,12 +393,12 @@ func Test_defaultNetworkingManager_computePermissionsForPeerPort(t *testing.T) {
 						ToPort:     awssdk.Int64(80),
 						UserIdGroupPairs: []*ec2sdk.UserIdGroupPair{
 							{
-								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=shared"),
+								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=test-123"),
 								GroupId:     awssdk.String("sg-abcdefg"),
 							},
 						},
 					},
-					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: tgbNetworkingIPPermissionLabelValue},
+					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: testClusterName},
 				},
 				{
 					Permission: ec2sdk.IpPermission{
@@ -403,12 +407,12 @@ func Test_defaultNetworkingManager_computePermissionsForPeerPort(t *testing.T) {
 						ToPort:     awssdk.Int64(8080),
 						UserIdGroupPairs: []*ec2sdk.UserIdGroupPair{
 							{
-								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=shared"),
+								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=test-123"),
 								GroupId:     awssdk.String("sg-abcdefg"),
 							},
 						},
 					},
-					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: tgbNetworkingIPPermissionLabelValue},
+					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: testClusterName},
 				},
 			},
 		},
@@ -434,12 +438,12 @@ func Test_defaultNetworkingManager_computePermissionsForPeerPort(t *testing.T) {
 						ToPort:     awssdk.Int64(8080),
 						UserIdGroupPairs: []*ec2sdk.UserIdGroupPair{
 							{
-								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=shared"),
+								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=test-123"),
 								GroupId:     awssdk.String("sg-abcdefg"),
 							},
 						},
 					},
-					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: tgbNetworkingIPPermissionLabelValue},
+					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: testClusterName},
 				},
 			},
 		},
@@ -464,19 +468,21 @@ func Test_defaultNetworkingManager_computePermissionsForPeerPort(t *testing.T) {
 						ToPort:     awssdk.Int64(65535),
 						UserIdGroupPairs: []*ec2sdk.UserIdGroupPair{
 							{
-								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=shared"),
+								Description: awssdk.String("elbv2.k8s.aws/targetGroupBinding=test-123"),
 								GroupId:     awssdk.String("sg-abcdefg"),
 							},
 						},
 					},
-					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: tgbNetworkingIPPermissionLabelValue},
+					Labels: map[string]string{tgbNetworkingIPPermissionLabelKey: testClusterName},
 				},
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &defaultNetworkingManager{}
+			m := &defaultNetworkingManager{
+                clusterName: testClusterName,
+            }
 			got, err := m.computePermissionsForPeerPort(context.Background(), tt.args.peer, tt.args.port, tt.args.pods)
 			if tt.wantErr != nil {
 				assert.EqualError(t, err, tt.wantErr.Error())

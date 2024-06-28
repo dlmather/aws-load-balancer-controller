@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"strings"
 	"time"
 
 	"k8s.io/client-go/tools/record"
@@ -116,6 +117,12 @@ func (m *defaultResourceManager) reconcileWithIPTargetType(ctx context.Context, 
 	var containsPotentialReadyEndpoints bool
 	var err error
 
+	cidrs, err := parseCIDR(tgb)
+	if err != nil {
+		return fmt.Errorf("parse cidrs: %w", err)
+	}
+	resolveOpts = append(resolveOpts, backend.WithCIDRRanges(cidrs))
+
 	endpoints, containsPotentialReadyEndpoints, err = m.endpointResolver.ResolvePodEndpoints(ctx, svcKey, tgb.Spec.ServiceRef.Port, resolveOpts...)
 
 	if err != nil {
@@ -127,7 +134,7 @@ func (m *defaultResourceManager) reconcileWithIPTargetType(ctx context.Context, 
 	}
 
 	tgARN := tgb.Spec.TargetGroupARN
-	targets, err := m.targetsManager.ListTargets(ctx, tgARN)
+	targets, err := m.targetsManager.ListTargets(ctx, tgARN, cidrs)
 	if err != nil {
 		return err
 	}
@@ -191,7 +198,7 @@ func (m *defaultResourceManager) reconcileWithInstanceTargetType(ctx context.Con
 		return err
 	}
 	tgARN := tgb.Spec.TargetGroupARN
-	targets, err := m.targetsManager.ListTargets(ctx, tgARN)
+	targets, err := m.targetsManager.ListTargets(ctx, tgARN, []netip.Prefix{})
 	if err != nil {
 		return err
 	}
@@ -216,7 +223,11 @@ func (m *defaultResourceManager) reconcileWithInstanceTargetType(ctx context.Con
 }
 
 func (m *defaultResourceManager) cleanupTargets(ctx context.Context, tgb *elbv2api.TargetGroupBinding) error {
-	targets, err := m.targetsManager.ListTargets(ctx, tgb.Spec.TargetGroupARN)
+	cidrs, err := parseCIDR(tgb)
+	if err != nil {
+		return fmt.Errorf("parse cidrs: %w", err)
+	}
+	targets, err := m.targetsManager.ListTargets(ctx, tgb.Spec.TargetGroupARN, cidrs)
 	if err != nil {
 		if isELBV2TargetGroupNotFoundError(err) {
 			return nil
@@ -538,4 +549,18 @@ func isELBV2TargetGroupARNInvalidError(err error) bool {
 		return awsErr.Code() == "ValidationError"
 	}
 	return false
+}
+
+func parseCIDR(tgb *elbv2api.TargetGroupBinding) ([]netip.Prefix, error) {
+	var cidrs []netip.Prefix
+	// only triggered if the object has an annotation named `annotation`
+	if annotation := tgb.Annotations["filter-cidrs"]; annotation != "" {
+		s := strings.Split(annotation, ",")
+		c, err := networking.ParseCIDRs(s)
+		if err != nil {
+			return cidrs, err
+		}
+		cidrs = c
+	}
+	return cidrs, nil
 }

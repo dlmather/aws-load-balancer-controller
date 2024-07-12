@@ -1,6 +1,8 @@
 package backend
 
 import (
+	"net/netip"
+
 	corev1 "k8s.io/api/core/v1"
 	discv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -41,6 +43,9 @@ type EndpointResolveOptions struct {
 	// [Pod Endpoint] if pod readinessGates is defined, then pods from unready addresses with any of these readinessGates and containersReady condition will be included as well.
 	// By default, no readinessGate is specified.
 	PodReadinessGates []corev1.PodConditionType
+
+	// cidrs will be used to filter out the list of IPs returned by the resolver
+	cidrs []netip.Prefix
 }
 
 func (opts *EndpointResolveOptions) ApplyOptions(options []EndpointResolveOption) {
@@ -62,6 +67,14 @@ func WithNodeSelector(nodeSelector labels.Selector) EndpointResolveOption {
 func WithPodReadinessGate(cond corev1.PodConditionType) EndpointResolveOption {
 	return func(opts *EndpointResolveOptions) {
 		opts.PodReadinessGates = append(opts.PodReadinessGates, cond)
+	}
+}
+
+// WithCIDRRanges is an option that appends cidrs into EndpointResolveOptions to filter
+// out the set of IPs to register
+func WithCIDRRanges(cidrs []netip.Prefix) EndpointResolveOption {
+	return func(opts *EndpointResolveOptions) {
+		opts.cidrs = cidrs
 	}
 }
 

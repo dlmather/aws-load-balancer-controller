@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"fmt"
+	"net/netip"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/go-logr/logr"
@@ -13,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/aws-load-balancer-controller/pkg/k8s"
+	"sigs.k8s.io/aws-load-balancer-controller/pkg/networking"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -72,7 +74,7 @@ func (r *defaultEndpointResolver) ResolvePodEndpoints(ctx context.Context, svcKe
 	if err != nil {
 		return nil, false, err
 	}
-	return r.resolvePodEndpointsWithEndpointsData(ctx, svcKey, svcPort, endpointsDataList, resolveOpts.PodReadinessGates)
+	return r.resolvePodEndpointsWithEndpointsData(ctx, svcKey, svcPort, endpointsDataList, resolveOpts.PodReadinessGates, resolveOpts.cidrs)
 }
 
 func (r *defaultEndpointResolver) ResolveNodePortEndpoints(ctx context.Context, svcKey types.NamespacedName, port intstr.IntOrString, opts ...EndpointResolveOption) ([]NodePortEndpoint, error) {
@@ -140,7 +142,7 @@ func (r *defaultEndpointResolver) computeServiceEndpointsData(ctx context.Contex
 	return endpointsDataList, nil
 }
 
-func (r *defaultEndpointResolver) resolvePodEndpointsWithEndpointsData(ctx context.Context, svcKey types.NamespacedName, svcPort corev1.ServicePort, endpointsDataList []EndpointsData, podReadinessGates []corev1.PodConditionType) ([]PodEndpoint, bool, error) {
+func (r *defaultEndpointResolver) resolvePodEndpointsWithEndpointsData(ctx context.Context, svcKey types.NamespacedName, svcPort corev1.ServicePort, endpointsDataList []EndpointsData, podReadinessGates []corev1.PodConditionType, cidrs []netip.Prefix) ([]PodEndpoint, bool, error) {
 	var readyPodEndpoints []PodEndpoint
 	var unknownPodEndpoints []PodEndpoint
 	containsPotentialReadyEndpoints := false
@@ -169,6 +171,19 @@ func (r *defaultEndpointResolver) resolvePodEndpointsWithEndpointsData(ctx conte
 					r.logger.Info("the pod in endpoint is not found in pod cache yet, will keep retrying", "podKey", podKey.String())
 					containsPotentialReadyEndpoints = true
 					continue
+				}
+
+				if len(cidrs) > 0 {
+					ip, err := netip.ParseAddr(epAddr)
+					if err != nil {
+						return nil, false, fmt.Errorf("parse ip addr: %w", err)
+					}
+					if !networking.IsIPWithinCIDRs(ip, cidrs) {
+						// this condition should never hit as long as cidrs are configured properly. if hit, then look at the cidr configured
+						// and make sure podIPs are within the range passed in.
+						r.logger.Error(fmt.Errorf("ip from endpoints being filtered"), fmt.Sprintf("unexpected condition hit for %s and ip: %s and cidrs: %s", svcKey.Name, epAddr, cidrs))
+						continue
+					}
 				}
 
 				podEndpoint := buildPodEndpoint(pod, epAddr, epPort)

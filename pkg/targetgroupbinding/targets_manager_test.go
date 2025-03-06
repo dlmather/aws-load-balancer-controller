@@ -2,6 +2,11 @@ package targetgroupbinding
 
 import (
 	"context"
+	"net/netip"
+	"sync"
+	"testing"
+	"time"
+
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	elbv2sdk "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	elbv2types "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
@@ -10,9 +15,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/cache"
 	"sigs.k8s.io/aws-load-balancer-controller/pkg/aws/services"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sync"
-	"testing"
-	"time"
 )
 
 func Test_cachedTargetsManager_RegisterTargets(t *testing.T) {
@@ -791,7 +793,7 @@ func Test_cachedTargetsManager_ListTargets(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			got, err := m.ListTargets(ctx, tt.args.tgARN)
+			got, err := m.ListTargets(ctx, tt.args.tgARN, []netip.Prefix{})
 			if tt.wantErr != nil {
 				assert.EqualError(t, err, tt.wantErr.Error())
 			} else {
@@ -1189,7 +1191,7 @@ func Test_cachedTargetsManager_refreshUnhealthyTargets(t *testing.T) {
 				elbv2Client: elbv2Client,
 			}
 			ctx := context.Background()
-			got, err := m.refreshUnhealthyTargets(ctx, tt.args.tgARN, tt.args.cachedTargets)
+			got, err := m.refreshUnhealthyTargets(ctx, tt.args.tgARN, tt.args.cachedTargets, []netip.Prefix{})
 			if tt.wantErr != nil {
 				assert.EqualError(t, err, tt.wantErr.Error())
 			} else {
@@ -1352,7 +1354,7 @@ func Test_cachedTargetsManager_listTargetsFromAWS(t *testing.T) {
 				elbv2Client: elbv2Client,
 			}
 			ctx := context.Background()
-			got, err := m.listTargetsFromAWS(ctx, tt.args.tgARN, tt.args.targets)
+			got, err := m.listTargetsFromAWS(ctx, tt.args.tgARN, tt.args.targets, []netip.Prefix{})
 			if tt.wantErr != nil {
 				assert.EqualError(t, err, tt.wantErr.Error())
 			} else {

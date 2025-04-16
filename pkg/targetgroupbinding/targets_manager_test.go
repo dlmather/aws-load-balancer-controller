@@ -2,6 +2,12 @@ package targetgroupbinding
 
 import (
 	"context"
+	"fmt"
+	"net/netip"
+	"sync"
+	"testing"
+	"time"
+
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	elbv2sdk "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	elbv2types "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
@@ -10,9 +16,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/cache"
 	"sigs.k8s.io/aws-load-balancer-controller/pkg/aws/services"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sync"
-	"testing"
-	"time"
 )
 
 func Test_cachedTargetsManager_RegisterTargets(t *testing.T) {
@@ -557,6 +560,7 @@ func Test_cachedTargetsManager_ListTargets(t *testing.T) {
 	}
 	type args struct {
 		tgARN string
+		cidrs []netip.Prefix
 	}
 	tests := []struct {
 		name             string
@@ -566,6 +570,44 @@ func Test_cachedTargetsManager_ListTargets(t *testing.T) {
 		wantTargetsCache map[string][]TargetInfo
 		wantErr          error
 	}{
+		{
+			name: "when targets for targetGroup don't exists in cache and no targets in cidrs are healthy",
+			fields: fields{
+				describeTargetHealthWithContextCalls: []describeTargetHealthWithContextCall{
+					{
+						req: &elbv2sdk.DescribeTargetHealthInput{
+							TargetGroupArn: awssdk.String("my-tg"),
+							Targets:        nil,
+						},
+						resp: &elbv2sdk.DescribeTargetHealthOutput{
+							TargetHealthDescriptions: []elbv2types.TargetHealthDescription{
+								{
+									Target: &elbv2types.TargetDescription{
+										Id:   awssdk.String("192.168.1.1"),
+										Port: awssdk.Int32(8080),
+									},
+									TargetHealth: &elbv2types.TargetHealth{
+										State: elbv2types.TargetHealthStateEnumHealthy,
+									},
+								},
+							},
+						},
+					},
+				},
+				targetsCache: nil,
+			},
+			args: args{
+				tgARN: "my-tg",
+				cidrs: []netip.Prefix{
+					*getPrefixFromIp("192.168.2.1", 24),
+					*getPrefixFromIp("192.168.3.1", 24),
+				},
+			},
+			want: []TargetInfo{},
+			wantTargetsCache: map[string][]TargetInfo{
+				"my-tg": {},
+			},
+		},
 		{
 			name: "when targets for targetGroup don't exists in cache",
 			fields: fields{
@@ -594,6 +636,10 @@ func Test_cachedTargetsManager_ListTargets(t *testing.T) {
 			},
 			args: args{
 				tgARN: "my-tg",
+				cidrs: []netip.Prefix{
+					*getPrefixFromIp("192.168.1.1", 24),
+					*getPrefixFromIp("192.168.2.1", 24),
+				},
 			},
 			want: []TargetInfo{
 				{
@@ -640,6 +686,10 @@ func Test_cachedTargetsManager_ListTargets(t *testing.T) {
 			},
 			args: args{
 				tgARN: "my-tg",
+				cidrs: []netip.Prefix{
+					*getPrefixFromIp("192.168.1.1", 24),
+					*getPrefixFromIp("192.168.2.1", 24),
+				},
 			},
 			want: []TargetInfo{
 				{
@@ -721,6 +771,10 @@ func Test_cachedTargetsManager_ListTargets(t *testing.T) {
 			},
 			args: args{
 				tgARN: "my-tg",
+				cidrs: []netip.Prefix{
+					*getPrefixFromIp("192.168.1.1", 24),
+					*getPrefixFromIp("192.168.2.1", 24),
+				},
 			},
 			want: []TargetInfo{
 				{
@@ -791,7 +845,7 @@ func Test_cachedTargetsManager_ListTargets(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			got, err := m.ListTargets(ctx, tt.args.tgARN)
+			got, err := m.ListTargets(ctx, tt.args.tgARN, tt.args.cidrs)
 			if tt.wantErr != nil {
 				assert.EqualError(t, err, tt.wantErr.Error())
 			} else {
@@ -821,6 +875,7 @@ func Test_cachedTargetsManager_refreshUnhealthyTargets(t *testing.T) {
 	type args struct {
 		tgARN         string
 		cachedTargets []TargetInfo
+		cidrs         []netip.Prefix
 	}
 	tests := []struct {
 		name    string
@@ -855,6 +910,10 @@ func Test_cachedTargetsManager_refreshUnhealthyTargets(t *testing.T) {
 							State: elbv2types.TargetHealthStateEnumHealthy,
 						},
 					},
+				},
+				cidrs: []netip.Prefix{
+					*getPrefixFromIp("192.168.1.1", 24),
+					*getPrefixFromIp("192.168.2.1", 24),
 				},
 			},
 			want: []TargetInfo{
@@ -945,6 +1004,10 @@ func Test_cachedTargetsManager_refreshUnhealthyTargets(t *testing.T) {
 							State:  elbv2types.TargetHealthStateEnumInitial,
 						},
 					},
+				},
+				cidrs: []netip.Prefix{
+					*getPrefixFromIp("192.168.1.1", 24),
+					*getPrefixFromIp("192.168.2.1", 24),
 				},
 			},
 			want: []TargetInfo{
@@ -1045,6 +1108,10 @@ func Test_cachedTargetsManager_refreshUnhealthyTargets(t *testing.T) {
 							State:  elbv2types.TargetHealthStateEnumInitial,
 						},
 					},
+				},
+				cidrs: []netip.Prefix{
+					*getPrefixFromIp("192.168.1.1", 24),
+					*getPrefixFromIp("192.168.2.1", 24),
 				},
 			},
 			want: []TargetInfo{
@@ -1152,6 +1219,10 @@ func Test_cachedTargetsManager_refreshUnhealthyTargets(t *testing.T) {
 						},
 					},
 				},
+				cidrs: []netip.Prefix{
+					*getPrefixFromIp("192.168.1.1", 24),
+					*getPrefixFromIp("192.168.2.1", 24),
+				},
 			},
 			want: []TargetInfo{
 				{
@@ -1189,7 +1260,7 @@ func Test_cachedTargetsManager_refreshUnhealthyTargets(t *testing.T) {
 				elbv2Client: elbv2Client,
 			}
 			ctx := context.Background()
-			got, err := m.refreshUnhealthyTargets(ctx, tt.args.tgARN, tt.args.cachedTargets)
+			got, err := m.refreshUnhealthyTargets(ctx, tt.args.tgARN, tt.args.cachedTargets, tt.args.cidrs)
 			if tt.wantErr != nil {
 				assert.EqualError(t, err, tt.wantErr.Error())
 			} else {
@@ -1213,6 +1284,7 @@ func Test_cachedTargetsManager_listTargetsFromAWS(t *testing.T) {
 	type args struct {
 		tgARN   string
 		targets []elbv2types.TargetDescription
+		cidrs   []netip.Prefix
 	}
 	tests := []struct {
 		name    string
@@ -1259,6 +1331,10 @@ func Test_cachedTargetsManager_listTargetsFromAWS(t *testing.T) {
 						Id:   awssdk.String("192.168.1.1"),
 						Port: awssdk.Int32(8080),
 					},
+				},
+				cidrs: []netip.Prefix{
+					*getPrefixFromIp("192.168.1.1", 24),
+					*getPrefixFromIp("192.168.2.1", 24),
 				},
 			},
 			want: []TargetInfo{
@@ -1313,6 +1389,10 @@ func Test_cachedTargetsManager_listTargetsFromAWS(t *testing.T) {
 			args: args{
 				tgARN:   "my-tg",
 				targets: nil,
+				cidrs: []netip.Prefix{
+					*getPrefixFromIp("192.168.1.1", 24),
+					*getPrefixFromIp("192.168.2.1", 24),
+				},
 			},
 			want: []TargetInfo{
 				{
@@ -1352,7 +1432,7 @@ func Test_cachedTargetsManager_listTargetsFromAWS(t *testing.T) {
 				elbv2Client: elbv2Client,
 			}
 			ctx := context.Background()
-			got, err := m.listTargetsFromAWS(ctx, tt.args.tgARN, tt.args.targets)
+			got, err := m.listTargetsFromAWS(ctx, tt.args.tgARN, tt.args.targets, tt.args.cidrs)
 			if tt.wantErr != nil {
 				assert.EqualError(t, err, tt.wantErr.Error())
 			} else {
@@ -2121,4 +2201,16 @@ func Test_cloneTargetInfoSlice(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func getPrefixFromIp(ipText string, bit int) *netip.Prefix {
+	// Parse the IP address
+	ip, err := netip.ParseAddr(ipText)
+	if err != nil {
+		fmt.Println("Error parsing IP:", err)
+		return nil
+	}
+
+	prefix := netip.PrefixFrom(ip, bit)
+	return &prefix
 }
